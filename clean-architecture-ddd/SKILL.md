@@ -164,6 +164,78 @@ let use_case = SubmitOrderUseCase::new(Arc::clone(&repo), event_bus);
 let controller = OrderController::new(use_case);
 ```
 
+### Step 5: UI Layer — GUIs Don't Change Anything
+
+Here's the key insight: **a GUI is just another infrastructure adapter.**
+The same use case that serves an HTTP controller serves a button click.
+
+```
+HTTP Controller ──┐
+CLI Command     ──┼──→ SubmitOrderUseCase ──→ Domain (unchanged!)
+GUI Button      ──┤
+REST API        ──┘
+```
+
+All four call the **same** `use_case.execute(order_id)`. The domain **never**
+knows about windows, buttons, or event loops.
+
+The UI adapter pattern — identical structure to the HTTP controller:
+
+```rust
+// infrastructure/ui.rs
+
+// UI state is SEPARATE from domain state — your domain Order doesn't know
+// about error banners or loading spinners.
+#[derive(Debug, Default)]
+pub struct OrderFormState {
+    pub error_message: Option<String>,
+    pub success_message: Option<String>,
+    pub pending_orders: Vec<UiOrderSummary>,
+    pub is_loading: bool,
+}
+
+pub struct OrderView {
+    submit_order: Arc<SubmitOrderUseCase<..>>,
+    cancel_order: Arc<CancelOrderUseCase<..>>,
+}
+
+impl OrderView {
+    // Called when user clicks "Submit Order" — same use case as HTTP!
+    pub fn on_submit_clicked(&self, state: &mut OrderFormState, order_id: Uuid) {
+        state.is_loading = true;
+        match self.submit_order.execute(order_id) {
+            Ok(result) => {
+                state.success_message = Some(format!("Order placed! Total: ${}",
+                    result.order.total().amount()));
+            }
+            Err(e) => {
+                state.error_message = Some(e.to_string());
+            }
+        }
+        state.is_loading = false;
+    }
+}
+```
+
+**Important distinction** — UI has its own state (`OrderFormState`) that tracks
+display concerns (loading spinners, error banners). This is **not** the domain
+state — the domain `Order` has no concept of "loading" or "error message."
+
+### Wiring with a UI
+
+Same composition root, just inject into UI instead of HTTP:
+
+```rust
+let repo = Arc::new(InMemoryOrderRepository::new());
+let submit_use_case = Arc::new(SubmitOrderUseCase::new(
+    Arc::clone(&repo), event_bus, email_service,
+));
+
+// Same use case, different adapter:
+let api_controller = OrderController::new(submit_use_case.clone());  // HTTP
+let order_view = OrderView::new(submit_use_case);                    // GUI
+```
+
 ## Testing — The Superpower
 
 Domain tests are **pure** — no mocks, no infrastructure:
@@ -198,6 +270,7 @@ fn test_submit_publishes_events() {
 | "How to enforce business rules?" | Entity methods with `Result<(), Error>` |
 | "Should this be an Entity or Value Object?" | Has identity? → Entity. Compare by attributes? → Value Object |
 | "Trait object (dyn) or enum for events?" | **Enum** in Rust — it's Send+Sync+Clone friendly |
+| "How do I add a GUI?" | Add `ui.rs` adapter — domain + use cases unchanged |
 
 ## Files You'll Actually Create
 
@@ -217,10 +290,12 @@ src/
 └── infrastructure/
     ├── mod.rs
     ├── persistence.rs        # Repo implementations
-    └── api.rs                # Controllers, HTTP handlers
+    ├── api.rs                # HTTP controllers
+    └── ui.rs                 # GUI adapter (same use cases, different caller)
 tests/
 ├── domain_tests.rs           # Zero infrastructure needed
-└── application_tests.rs      # Mocked traits
+├── application_tests.rs      # Mocked traits
+└── (ui tests live in ui.rs   # Testable without rendering a window)
 ```
 
 ## References

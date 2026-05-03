@@ -17,6 +17,7 @@
 5. [Infrastructure Layer](#infrastructure-layer)
    - [Repository Implementations](#repository-implementations)
    - [API Controllers](#api-controllers)
+   - [UI Adapters](#ui-adapters)
    - [Composition Root](#composition-root)
 6. [Testing Strategy](#testing-strategy)
 7. [Rust-Specific Considerations](#rust-specific-considerations)
@@ -529,6 +530,134 @@ impl OrderController {
 }
 ```
 
+### UI Adapters
+
+A GUI is **just another adapter** — structurally identical to the HTTP controller.
+The use case doesn't know or care whether it's called from a button click,
+HTTP request, CLI command, or test runner.
+
+```
+HTTP Controller ──┐
+CLI Command     ──┼──→ SubmitOrderUseCase──→ Domain (unchanged!)
+GUI Button      ──┤
+REST API        ──┘
+```
+
+**Key distinction: UI state ≠ Domain state**
+
+Your domain `Order` has no concept of loading, error messages, or form fields.
+Those are UI-layer concerns.
+
+```rust
+// src/infrastructure/ui.rs
+
+// UI state — display concerns, NOT domain state
+#[derive(Debug, Default)]
+pub struct OrderFormState {
+    pub customer_email: String,           // form input
+    pub error_message: Option<String>,     // error banner
+    pub success_message: Option<String>,   // toast notification
+    pub pending_orders: Vec<UiOrderSummary>, // list view data
+    pub is_loading: bool,                 // spinner state
+}
+
+// UI model — a view-friendly projection of domain data
+#[derive(Debug, Clone)]
+pub struct UiOrderSummary {
+    pub order_id: Uuid,
+    pub total: String,       // pre-formatted for display
+    pub item_count: usize,
+    pub status: String,      // human-readable
+}
+
+// The UI adapter — holds use cases, same as the HTTP controller
+pub struct OrderView {
+    create_order: Arc<CreateOrderUseCase<..>>,
+    add_item: Arc<AddItemUseCase<..>>,
+    submit_order: Arc<SubmitOrderUseCase<..>>,
+    cancel_order: Arc<CancelOrderUseCase<..>>,
+}
+
+impl OrderView {
+    /// Called when user clicks "Submit Order" button.
+    /// In a real GUI this is bound to: button.on_click(|| view.on_submit(state, id))
+    pub fn on_submit_clicked(&self, state: &mut OrderFormState, order_id: Uuid) {
+        state.is_loading = true;
+        state.error_message = None;
+
+        // Same use case call as HTTP — no difference!
+        match self.submit_order.execute(order_id) {
+            Ok(result) => {
+                state.success_message = Some(format!(
+                    "Order placed! Total: ${}",
+                    result.order.total().amount()
+                ));
+            }
+            Err(e) => {
+                state.error_message = Some(e.to_string());
+            }
+        }
+
+        state.is_loading = false;
+    }
+
+    /// Called when user clicks "Cancel Order"
+    pub fn on_cancel_clicked(&self, state: &mut OrderFormState, order_id: Uuid, reason: String) {
+        state.is_loading = true;
+
+        match self.cancel_order.execute(order_id, reason) {
+            Ok(result) => {
+                state.success_message = Some("Order cancelled.".into());
+            }
+            Err(e) => {
+                state.error_message = Some(e.to_string());
+            }
+        }
+
+        state.is_loading = false;
+    }
+}
+```
+
+**Wiring: same dependencies, injected into UI instead of HTTP:**
+
+```rust
+let repo = Arc::new(InMemoryOrderRepository::new());
+let submit_use_case = Arc::new(SubmitOrderUseCase::new(
+    Arc::clone(&repo), event_bus, email_service,
+));
+
+// Same use case, two different adapters — both work:
+let api = OrderController::new(submit_use_case.clone());  // HTTP
+let view = OrderView::new(submit_use_case);               // GUI
+```
+
+**Testing UI logic without a window:**
+
+```rust
+#[test]
+fn test_ui_submit_empty_order_shows_error() {
+    let (view, _repo) = build_ui();
+    let mut state = OrderFormState::default();
+
+    view.on_create_order_clicked(&mut state, "bob@test.com".into());
+    let order_id = state.pending_orders[0].order_id;
+    view.on_submit_clicked(&mut state, order_id);
+
+    // Domain validation error bubbles up to UI state — no window needed!
+    assert!(state.error_message.unwrap().contains("no items"));
+}
+```
+
+**What changes when adding a GUI:**
+
+| Layer | Changed? | What |
+|-------|----------|------|
+| **Domain** | ❌ Nothing | Entities, value objects, events — unchanged |
+| **Application** | ❌ Nothing | Use cases, ports — unchanged |
+| **Infrastructure** | ✅ New file | `ui.rs` — adapter that calls use cases |
+| **Composition root** | ✅ New wiring | Inject use cases into UI instead of (or alongside) HTTP |
+
 ### Composition Root
 
 The single place where all dependencies are wired together:
@@ -778,7 +907,8 @@ src/
 └── infrastructure/
     ├── mod.rs                        # module declarations
     ├── persistence.rs                # InMemoryOrderRepository, LoggingEventBus, LoggingEmailService
-    └── api.rs                        # OrderController, request/response types, OrderService composer
+    ├── api.rs                        # OrderController, request/response types, OrderService composer
+    └── ui.rs                         # OrderView, UI state types, GUI adapter + ui tests
 
 tests/
 ├── domain_tests.rs                   # 16 tests, zero infrastructure
@@ -789,10 +919,11 @@ tests/
 
 ## Project Status
 
-- ✅ 21 passing tests
+- ✅ 24 passing tests (16 domain + 5 application + 3 UI)
 - ✅ Running demo: `cargo run`
 - ✅ Full Clean Architecture layering
 - ✅ DDD patterns: Aggregate Root, Value Objects, Domain Events
 - ✅ Dependency inversion: domain traits → infrastructure impls
 - ✅ State machine with valid transitions only
 - ✅ Business invariants enforced at domain level
+- ✅ UI adapter: GUI calls same use cases as HTTP
