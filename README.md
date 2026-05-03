@@ -27,10 +27,10 @@ A complete, runnable Rust example accompanying the `clean-architecture-ddd` skil
 ### `clean-architecture-ddd`
 Clean Architecture + Domain-Driven Design patterns in Rust. Use when structuring new projects, separating concerns, designing domain models, or when working with layered architecture, dependency inversion, aggregates, value objects, or domain events.
 
-**Location:** `/home/kevin/.agents/skills/clean-architecture-ddd/`  
-**Example project:** `/home/kevin/source/clean-architecture/`
+**Location:** `~/.agents/skills/clean-architecture-ddd/`  
+**Example project:** `~/kevin/source/clean-architecture/`
 
 ### `refactoring-mf`
 Refactoring patterns catalog based on Martin Fowler's book, adapted for Rust. Use when refactoring code, identifying code smells, choosing refactoring strategies, or improving code structure.
 
-**Location:** `/home/kevin/.agents/skills/refactoring-mf/`
+**Location:** `~/kevin/.agents/skills/refactoring-mf/`
