@@ -2,7 +2,7 @@
 
 Agent skills for structured software development with an emphasis on clean architecture, domain-driven design, and systematic refactoring.
 
-## Repository: `[/home/kevin/source/clean-architecture](https://github.com/christophacham/clean-architecture-ddd-example)`
+## Repository: [christophacham/clean-architecture-ddd-example](https://github.com/christophacham/clean-architecture-ddd-example)
 
 A complete, runnable Rust example accompanying the `clean-architecture-ddd` skill.
 
